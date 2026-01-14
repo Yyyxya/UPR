@@ -1,0 +1,398 @@
+---
+title: "Figure 6"
+author: "Xinyu Yang"
+date: "2026-01-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+
+library(ggplot2)
+library(ggsci)
+library(ggsignif)
+library(dplyr)
+library(Seurat)
+library(dplyr)
+library(survival)
+library(survminer)
+library(stringr)
+
+BRCA <- load('./BRAC_survival.Rdata')
+B_exp_need$OS<-pd$OS
+B_exp_need$OS.time<-pd$OS.time
+median(B_exp_need$score)
+B_exp_need$group<-ifelse(B_exp_need$score>=4.271644,'High','Low')
+B_exp_need<-na.omit(B_exp_need)
+s1<-filter(B_exp_need,group=='High')
+s2<-filter(B_exp_need,group=='Low')
+sur1<-rbind(s1,s2)
+sfit1<-survfit(Surv(OS.time/360,OS)~group,data=sur1)
+ggsurvplot(sfit1,pval = T,legend=c(0.19,0.4),
+           title='TCGA-BRCA cohort (n = 1097)',risk.table = T,
+           palette = c("#E31A1C","#1F78B4"),
+           xlab='Year')
+
+
+BRCA <- load('./BRAC_survival.Rdata')
+B_exp_need<-cbind(B_exp_need,pd[,c(28:35)])
+B_exp_need<-na.omit(B_exp_need)
+median(B_exp_need$score)
+colnames(B_exp_need)
+B_exp_need <- B_exp_need[, !duplicated(colnames(B_exp_need))]
+B_exp_need$group<-ifelse(B_exp_need$score>=4.259774,'High','Low')
+table(B_exp_need$group)
+s1<-filter(B_exp_need,group=='High')
+s2<-filter(B_exp_need,group=='Low')
+sur1<-rbind(s1,s2)
+
+#PFI.time
+sfit1<-survfit(Surv(PFI.time/360,PFI)~group,data=sur1)
+
+#PFI.time
+sfit1<-survfit(Surv(PFI.time/360,PFI)~group,data=sur1)
+ggsurvplot(sfit1,pval = T,legend=c(0.25,0.4),
+           title='TCGA-BRCA cohort (n = 937)',risk.table = T,
+           palette = c("#E31A1C","#1F78B4"),
+           xlab = 'Year',
+           ylab = "Progression-free survival probability")
+
+
+BRCA <- load('./BRAC_survival.Rdata')
+B_exp_need$stage<-pd$new_stage
+df<-B_exp_need%>%group_by(stage)%>%
+  summarise(mean(score))
+
+ggplot(filter(B_exp_need,stage!='other'),aes(x=stage,y=score))+
+  geom_violin(aes(fill=stage),alpha=0.7,trim = T,scale = "area")+
+  #geom_point(position = position_jitter(width=0.25),size=0.5,alpha=0.2)+###缩小抖动点
+  geom_boxplot(width=0.15)+
+  geom_signif(
+    comparisons = list(c("Stage IV","Stage I"),
+                       c("Stage III","Stage I"),
+                       c("Stage II","Stage I")
+    ),test="wilcox.test",y_position = c(6,5.85,5.7),
+    tip_length = 0.01,size = 0.5,textsize = 6,#增加***尺寸
+    vjust=0.5,
+    map_signif_level = T #用*表示显著性，*---0.05，**---0.01，***---0.001
+  )+
+  scale_fill_lancet(name="Stage")+scale_x_discrete(limits = c("Stage I","Stage II","Stage III","Stage IV"))+
+  #scale_y_continuous(breaks = seq(0,1,0.25))+
+  theme_classic()+xlab("")+ylab("UPR predictor score")+
+  RotatedAxis()
+
+
+load('./gset_pd_all_BRCA.Rdata')
+gset_need <- lapply(gset_list, function(x){
+  x <- t(x)
+  x <- log2(x + 0.1)
+  x <- as.data.frame(x)
+  x <- x %>% mutate(UPR_predictor = 0.37306 * SHMT2 + 
+                      0.38118 * KDELR2 - 
+                      0.14916 * SLC1A4)
+  return(x)
+})
+
+
+
+##GSE9893##
+test <- gset_list$GSE9893 
+test <- test %>% t() %>% 
+  as.data.frame()
+test <- test %>% mutate(UPR_predictor = 0.37306 * SHMT2 + 
+                    0.38118 * KDELR2 - 
+                    0.14916 * SLC1A4)
+
+GSE9893 <- pd_list$GSE9893[,c(23,27)]
+head(GSE9893)
+GSE9893<- GSE9893 %>%
+  # 提取生存时间数字并转成数值
+  mutate(OS = str_extract(characteristics_ch1.13, "\\d+\\.?\\d*") %>% 
+           as.numeric() / 12,  # 转换成年
+         # 提取状态，死亡=1，存活=0
+         OS_event = ifelse(str_detect(characteristics_ch1.17, "deceased"), 1, 0)) %>%
+  # 只保留 OS 和 OS_event
+  select(OS, OS_event) %>% 
+  mutate(score = test[,"UPR_predictor"])
+median_score <- median(GSE9893$score, na.rm = TRUE)
+GSE9893$group <- ifelse(GSE9893$score >= median_score, "High", "Low")
+# 构建生存对象
+surv_obj <- Surv(time = GSE9893$OS, event = GSE9893$OS_event)
+
+# 拟合 Kaplan-Meier
+fit <- survfit(surv_obj ~ group, data = GSE9893)
+
+# 绘图
+ggsurvplot(
+  fit,
+  data = GSE9893,
+  pval = TRUE,                 # 显示 Log-rank 检验 p 值
+  risk.table = TRUE,           # 显示风险表
+  palette = c("#E31A1C","#1F78B4"), # Low / High 颜色
+  xlab = "Year",
+  ylab = "Survival probability",
+  title = "GSE9893 (n = 155)"
+)
+
+###GSE58112###
+
+colnames(pd_list$GSE58112)
+GSE58112 <- pd_list$GSE58112[,c(14:15)]
+head(GSE58112)
+GSE58112 <- GSE58112 %>%
+  mutate(OS_event = as.numeric(str_extract(characteristics_ch1.4, "\\d+")),
+         OS = str_extract(characteristics_ch1.5, "\\d+") %>% as.numeric(),
+         OS = OS / 365) %>%
+  select(OS, OS_event)%>% 
+  mutate(score = gset_need$GSE58112[,"UPR_predictor"])
+median_score <- median(GSE58112$score, na.rm = TRUE)
+GSE58112$group <- ifelse(GSE58112$score >= median_score, "High", "Low")
+# 构建生存对象
+surv_obj <- Surv(time = GSE58112$OS, event = GSE58112$OS_event)
+
+# 拟合 Kaplan-Meier
+fit <- survfit(surv_obj ~ group, data = GSE58112)
+
+# 绘图
+ggsurvplot(
+  fit,
+  data = GSE58112,
+  pval = TRUE,                 # 显示 Log-rank 检验 p 值
+  risk.table = TRUE,           # 显示风险表
+  palette = c("#E31A1C","#1F78B4"), # Low / High 颜色
+  xlab = "Year",
+  ylab = "Survival probability",
+  title = "GSE58112 (n = 107)"
+)
+
+
+###GSE12276
+colnames(pd_list$GSE12276)
+GSE12276 <- pd_list$GSE12276[, 11] %>% 
+  as.data.frame() %>% 
+  rename(OS = 1) %>%  # 把第1列改名为 OS
+  mutate(score = gset_need$GSE12276[,"UPR_predictor"])
+GSE12276$OS <- gsub(".*: ", "", GSE12276$OS)  # 删除冒号及之前的内容
+head(GSE12276)
+GSE12276$OS <- as.numeric(GSE12276$OS) / 12
+GSE12276$OS_event <- 1
+GSE12276$score <- gset_need$GSE12276[,"UPR_predictor"]
+median_score <- median(GSE12276$score, na.rm = TRUE)
+GSE12276$group <- ifelse(GSE12276$score >= median_score, "High", "Low")
+# 构建生存对象
+surv_obj <- Surv(time = GSE12276$OS, event = GSE12276$OS_event)
+
+# 拟合 Kaplan-Meier
+fit <- survfit(surv_obj ~ group, data = GSE12276)
+
+# 绘图
+ggsurvplot(
+  fit,
+  data = GSE12276,
+  pval = TRUE,                 # 显示 Log-rank 检验 p 值
+  risk.table = TRUE,           # 显示风险表
+  palette = c("#E31A1C","#1F78B4"), # Low / High 颜色
+  xlab = "Year",
+  ylab = "Survival probability",
+  title = "GSE12276 (n = 204)"
+)
+
+
+
+###GSE1456##
+GSE1456 <- pd_list$GSE1456[,c(44,48)] %>% 
+  mutate(score = gset_need$GSE1456[,"UPR_predictor"])
+head(GSE1456)
+median_score <- median(GSE1456$score, na.rm = TRUE)
+GSE1456$`SURV_DEATH:ch1` <- as.numeric(GSE1456$`SURV_DEATH:ch1`)
+GSE1456$`DEATH_BC:ch1` <- as.numeric(GSE1456$`DEATH_BC:ch1`)
+GSE1456 <- GSE1456 %>%
+  mutate(group = ifelse(score >= median_score, "High", "Low"))
+surv_obj <- Surv(time = GSE1456$`SURV_DEATH:ch1`, 
+                 event = GSE1456$`DEATH_BC:ch1`)
+fit <- survfit(surv_obj ~ group, data = GSE1456)
+ggsurvplot(
+  fit,
+  data = GSE1456,
+  pval = TRUE,                 # 显示 Log-rank 检验 p 值
+  risk.table = TRUE,           # 显示风险表
+  palette = c("#E31A1C","#1F78B4"), # Low / High 颜色
+  xlab = "Year",
+  ylab = "Survival probability",
+  title = "GSE1456 (n = 159)"
+)
+
+
+```
+
+
+```{r}
+library(clusterProfiler)
+library(GSVA)
+library(purrr)
+library(ComplexHeatmap)
+library(circlize)
+library(RColorBrewer)
+library(cols4all)
+
+test <- readRDS('./exp_all_BRCA.rds')
+
+Cell_adhesion <- c('ICAM1','ITGB2','SELP')
+Angiogenesis <- c("CDH5", "LDB2", "PECAM1", "SPARCL1", "VWF", 
+                  "PTPRB", "MEF2C", "ROBO4", "EDNRB", "ENG", "COL15A1", "JAM2",
+                  "ACVRL1", "GNG11", "ITGA9", "TEK", "PLVAP")
+Proliferated_Markers <- c('STMN1','MKI67','UBE2C')
+
+gene <- c(Cell_adhesion, Angiogenesis, Proliferated_Markers)
+cols<- c4a('accent',7)[1:3]#注释块的颜色
+
+
+row_cols <- setNames(rep(cols, times = c(3, 17, 3)), gene)
+row_anno<- rowAnnotation(foo = anno_text(gene,
+                                         location= 1,
+                                         just= "right",
+                                         gp= gpar(fill = row_cols,
+                                                  col= "black",
+                                                  fontface= 'italic',
+                                                  fontsize=15),
+                                         width= max_text_width(gene)*1.25))
+df<- data.frame(c('GSE12276','GSE1456','GSE58112','GSE9893','TCGA BRCA'))
+colnames(df) <- 'Datasets'
+col_anno<-HeatmapAnnotation(df = df,
+                              show_annotation_name= F,
+                              gp= gpar(col = 'white', lwd = 2),
+                              col= list(Datasets = c(
+                                'GSE12276' = "#FBB4AE",
+                                'GSE1456' = "#B3CDE3",
+                                'GSE58112' = "#CCEBC5",
+                                'GSE9893' = "#DECBE4",
+                                'TCGA BRCA' = "#FED9A6"
+                              )))
+
+batch_cor <- function(gene = gene, exprSet = exprSet, cor_gene = NULL,method="sp",n.core=2){
+  library(future.apply)
+  plan("multisession", workers = n.core)
+  plan()
+  #设置可用的内存
+  options(future.globals.maxSize = 10 * 1024^3)
+  y <- as.numeric(exprSet[gene,])
+  
+  if(is.null(cor_gene)){
+    cor_gene <-  row.names(exprSet)
+    cor_gene <- cor_gene[!cor_gene%in%gene]
+  }
+  data =  do.call(rbind,future_lapply(cor_gene, function(x){
+    dd  <- cor.test(as.numeric(exprSet[x,]),y,method=method)
+    data.frame(gene=gene,mRNAs=x,cor=dd$estimate,p.value=dd$p.value )
+  }))
+  data$FDR = p.adjust(data$p.value,method = "BH")
+  return(data)
+}
+
+cor_heatmap<-function(r,p,w,h){
+  Heatmap(
+    as.matrix(r), 
+    name = " ", 
+    border = "white",
+    col = colorRamp2(c(-0.5, 0, 0.5), c( "#0da9ce", "white", "#e74a32")),
+    rect_gp = gpar(col = "white", lwd = 2),
+    row_order = rownames(r),
+    row_names_side = NULL, 
+    show_row_names = F,
+    row_names_gp = gpar(fontsize = 15),
+    column_order = colnames(r),
+    column_names_side = "top", 
+    heatmap_legend_param= list(legend_height = unit(4, "cm"),
+                               grid_width= unit(0.5, "cm"),
+                               labels_gp= gpar(fontsize = 10)),
+    width= unit(w, "cm"),
+    height= unit(h, "cm"),
+    column_names_gp = gpar(
+      fontsize = 15
+    ),
+    top_annotation= col_anno,
+    left_annotation = row_anno,
+    row_split = rep(c('Proliferation', 'Angiogenesis', 'Cell Adhesion'), times=c(3,17,3)),
+    #rowAnnotation = row_anno,
+    #heatmap_width = unit(100, "mm"),
+    #width = unit(6, "cm"),# 设置热图区域宽度
+    #heatmap_height = unit(100, "mm"),
+    #height = unit(50, "mm"),
+    cell_fun = function(j, i, x, y, width, height, fill) {
+      if (p[i,j] < 0.001) {
+        grid.text("***",  x, y, gp = gpar(fontsize = 15))
+      } else if (p[i,j]<0.01) {
+        grid.text("**", x, y, gp = gpar(fontsize = 15))
+      } else if (p[i,j]<0.05) {
+        grid.text("*",  x, y, gp = gpar(fontsize = 15))
+      }else {
+        grid.text("", x, y)
+      }
+    }
+  )
+}
+
+plot<-function(gene,w,h){
+  Costi <- lapply(test, function(x) {
+    x <- x[,colnames(x)%in%c(gene,"UPR_score")]
+    x<-t(scale(t(x)))
+    return(x)
+  })
+  
+  ##批量相关性分析
+  ##共刺激因子
+  Costi_cor<-lapply(Costi, function(x){
+    batch_cor(gene = 'UPR_score',exprSet = t(x))
+  })
+  Costi_cor<-lapply(Costi_cor,function(x){
+    rownames(x)<-x$mRNAs
+    x<-x[gene,]
+    return(x)
+  })
+  #Costi_cor
+  Costi_cor<-do.call(cbind,Costi_cor)
+  
+  r1 <- do.call(cbind,Costi_cor)
+  selected_cols <- colnames(r1)[grepl("cor|value", colnames(r1))]
+  r1<-r1[,selected_cols]
+  colnames(r1)
+  p1<-r1[,c(2,4,6,8,10)]
+  r1<-r1[,c(1,3,5,7,9)]
+  #r1<-as.data.frame(r1)
+  r1##相关系数矩阵
+  r1<-apply(r1, 2,as.numeric)
+  rownames(r1)<-gene
+  p1
+  colnames(r1)<-c('GSE12276','GSE1456','GSE58112','GSE9893','TCGA BRCA')
+  colnames(p1)<-c('GSE12276','GSE1456','GSE58112','GSE9893','TCGA BRCA')
+  p<-cor_heatmap(r=r1,p=p1,w=w,h=h)
+  return(p)
+}
+
+plot(gene = gene, w=6 ,h = 12) 
+
+```
+

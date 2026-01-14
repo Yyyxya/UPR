@@ -1,0 +1,318 @@
+---
+title: "Figure 4"
+author: "Xinyu Yang"
+date: "2026-01-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+library(ggpubr)
+## Step 01. 获取UMAP坐标信息
+msce <- readRDS('./msce.rds')
+umap <- msce@reductions$umap@cell.embeddings %>% as.data.frame
+
+## Step 02. 获取与坐标对应的细胞类型
+cellType <- msce$celltype %>% as.data.frame %>%
+  `colnames<-` ("Celltype")
+umap <- cbind(umap, cellType)
+head(umap)
+
+##UMAP
+load('./color_for_scRNAseq.Rdata')
+allcolour<-data.color$color.scRNAseq[6:10]
+show(allcolour)
+allcolour<- colorRampPalette(allcolour)(10)
+
+myTheme <- theme(
+  panel.background = element_blank(),
+  panel.grid = element_blank(),
+  axis.line = element_blank(),
+  axis.title = element_blank(),
+  axis.text = element_blank(),
+  axis.ticks = element_blank(),
+  legend.background = element_blank(),
+  legend.key = element_blank(),
+  legend.key.size = unit(1, "cm"),
+  legend.text = element_text(size = 12),
+)  
+
+cellTypeLoc <- umap %>%
+  group_by(Celltype) %>%
+  summarise(
+    Loc1 = median(UMAP_1),
+    Loc2 = median(UMAP_2)
+  ) %>% as.data.frame
+
+xstart <- min(umap$UMAP_1); xend <- min(umap$UMAP_1) + 3
+ystart <- min(umap$UMAP_2); yend <- min(umap$UMAP_2) + 3
+allcolour<-data.color$color.scRNAseq[1:10]
+p <- ggplot(umap,aes(x= UMAP_1 , y = UMAP_2 ,colour = Celltype)) +  
+  geom_point(size =0.8,alpha=0.5) +  
+  scale_colour_manual(values = allcolour)+
+  guides(colour = guide_legend(
+    override.aes = list(size=3)))+
+  geom_segment(aes(x = xstart, y = ystart , xend = xend, yend = ystart),
+               colour = "black", linewidth=1,arrow = arrow(length = unit(0.3,"cm")))+ 
+  geom_segment(aes(x = xstart, y = ystart, xend = xstart , yend = yend),
+               colour = "black", linewidth=1,arrow = arrow(length = unit(0.3,"cm"))) +
+  annotate("text", x = xstart +1.5, y = ystart -1, label = "UMAP_1",
+           color="black",size = 4 ) + 
+  annotate("text", x = xstart -1, y = ystart + 1.5, label = "UMAP_2",
+           color="black",size = 4, angle=90) +
+  geom_text(data = cellTypeLoc, 
+            mapping = aes(x = Loc1, y = Loc2, label = Celltype),
+            color = "black", size = 4.5)+myTheme+
+  labs(color='Celltype')
+p
+
+# 假设你的Seurat对象是 msce
+meta <- msce@meta.data
+
+# 按细胞类型计算中位数 AUC，用于排序
+celltype_order <- meta %>%
+  group_by(celltype) %>%
+  summarise(median_AUC = median(AUC, na.rm = TRUE)) %>%
+  arrange(desc(median_AUC)) %>%
+  pull(celltype)
+
+# 将celltype设置为因子，并按AUC中位数排序
+meta$celltype <- factor(meta$celltype, levels = celltype_order)
+allcolour<-data.color$color.scRNAseq[1:10]
+# 绘制小提琴图
+ggplot(meta, aes(x = celltype, y = AUC, fill = celltype)) +
+  geom_violin(trim = TRUE, scale = "width") +
+  geom_boxplot(width = 0.1, outlier.shape = NA, fill = "white") +
+  scale_fill_manual(values = allcolour) +  # 自定义颜色
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Cell Type", y = "AUC", title = "AUC by Cell Type")
+
+
+
+meta <- msce@meta.data
+
+# 计算每个样本在每个细胞类型的比例
+prop_df <- meta %>%
+  group_by(orig.ident, group, celltype) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  group_by(orig.ident) %>%
+  mutate(prop = count / sum(count))
+prop_df <- prop_df %>%
+  mutate(group = ifelse(grepl("low", group), "low", "high"))
+prop_df <- prop_df %>%
+  dplyr::mutate(prop = prop * 100)
+
+# 定义比较组
+comparisons <- list(c("low", "high"))
+
+ggplot(prop_df, aes(x = group, y = prop, color = group)) +
+  geom_jitter(width = 0.2, size = 3, alpha = 0.8) +  # 每个点代表一个样本
+  stat_summary(
+    fun = mean,                 
+    fun.min = function(x) mean(x) - sd(x)/sqrt(length(x)),  
+    fun.max = function(x) mean(x) + sd(x)/sqrt(length(x)),  
+    geom = "errorbar",
+    width = 0.2,
+    size = 0.8,
+    color = "#E31A1C"
+  ) +
+  stat_summary(
+    fun = mean,
+    geom = "point",
+    size = 4,
+    shape = 18,
+    color = "#E31A1C"
+  ) +
+  facet_wrap(~celltype, scales = "free_y",nrow = 1) +         # 按 celltype 分面
+  scale_color_manual(values = c("low" = "#56B4E9", "high" = "#E69F00")) +
+  stat_compare_means(
+    comparisons = comparisons,
+    method = "t.test",        # 非配对 t 检验
+    label = "p.signif",       # 显示显著性标记 (*, **, ***)
+    size = 4
+  ) +
+  theme_bw() +
+  theme(
+    axis.title.x = element_blank(),
+    strip.text = element_text(size = 12),
+    axis.text.x = element_text(size = 10)
+  ) +
+  labs(y = "Proportion of Cells")+
+  scale_y_continuous(expand = c(0.1, 0.1))
+
+
+
+
+plot_list <- readRDS('./plot_list.rds')
+
+if(T){
+  text.size = 10
+  text.angle = 45
+  text.hjust = 1
+  legend.position = "right"
+  mytheme <- theme(plot.title = element_text(size = text.size+2,color="black",hjust = 0.5),
+                   axis.ticks = element_line(color = "black"),
+                   axis.title = element_text(size = text.size,color ="black"), 
+                   axis.text = element_text(size=text.size,color = "black"),
+                   axis.text.x = element_text(angle = text.angle, hjust = text.hjust ), #,vjust = 0.5
+                   #axis.line = element_line(color = "black"),
+                   #axis.ticks = element_line(color = "black"),
+                   #panel.grid.minor.y = element_blank(),
+                   #panel.grid.minor.x = element_blank(),
+                   panel.grid=element_blank(), # 去网格线
+                   legend.position = legend.position,
+                   legend.text = element_text(size= text.size),
+                   legend.title= element_text(size= text.size),
+                   # panel.border = element_rect(fill=NA,color="black", size=0.8, linetype="solid"),
+                   # strip.background = element_rect(color="black",size= 1, linetype="solid") # fill="#FC4E07", 
+  )
+}
+mytheme2 <- mytheme + theme(axis.text.y = element_blank())
+
+ggplot(plot_list$Macro3, aes(x = GeneRatio, y = Description, fill = -log10(pvalue))) +
+  scale_fill_distiller(palette = "YlOrRd", direction = 1) +
+  geom_bar(stat = "identity", width = 0.8, alpha = 0.7) +
+  labs(x = "GeneRatio", y = "", title = "Enrichment analysis of marker genes of Macro3") +
+  geom_text(aes(x = 0.03, #用数值向量控制文本标签起始位置
+                label = Description),
+            hjust = 0)+ #hjust = 0,左对齐
+  theme_classic() + mytheme2+
+  theme(axis.ticks.y = element_blank(), 
+        #axis.line.y = element_blank()
+  )
+
+
+
+ggplot(plot_list$Macro4, aes(x = GeneRatio, y = Description, fill = -log10(pvalue))) +
+  scale_fill_distiller(palette = "YlOrRd", direction = 1) +
+  geom_bar(stat = "identity", width = 0.8, alpha = 0.7) +
+  labs(x = "GeneRatio", y = "", title = "Enrichment analysis of marker genes of Macro4") +
+  geom_text(aes(x = 0.03, #用数值向量控制文本标签起始位置
+                label = Description),
+            hjust = 0)+ #hjust = 0,左对齐
+  theme_classic() + mytheme2+
+  theme(axis.ticks.y = element_blank(), 
+        #axis.line.y = element_blank()
+  )
+
+
+library(circlize)
+library(ComplexHeatmap)
+library(Seurat)
+m <- c("ISG15","CXCL9", "CXCL10", "CD274", "IL4I1")
+mean_gene_exp <- AverageExpression(msce,
+                                   features = m,
+                                   group.by = 'celltype',
+                                   slot = 'data') %>%
+  data.frame() %>%
+  as.matrix()
+mean_gene_exp[1:5,1:5]
+# add colnames
+colnames(mean_gene_exp) <- gsub('RNA\\.','',colnames(mean_gene_exp))
+
+# Z-score
+htdf <- t(scale(t(mean_gene_exp),scale = T,center = T)) 
+htdf <- htdf [,c(4:9)]
+
+# color
+col_fun = colorRamp2(c(-2, 0, 2), c("#0099CC", "white", "#CC0033"))
+anno_col <- c(
+  "Macro1" = "#A6CEE3",
+  "Macro2" = "#1F78B4",
+  "Macro3" = "#B2DF8A",
+  "Macro4" = "#33A02C",
+  "Macro5" = "#FB9A99",
+  "Macro6" = "#E31A1C"
+)
+
+# top annotation
+column_ha = HeatmapAnnotation(cluster = colnames(htdf),
+                              col = list(cluster = anno_col))
+
+
+#plot
+Heatmap(htdf,
+        name = "Z-score",
+        cluster_columns = F,cluster_rows = F,
+        row_title = "IFN-TAMs markers",
+        column_title = "Clusters",
+        row_names_gp = gpar(fontface = 'italic',fontsize = 10),
+        row_names_side = 'left',
+        border = T,
+        rect_gp = gpar(col = "white", lwd = 1),
+        column_names_side = 'top',
+        column_names_rot = 45,
+        top_annotation = column_ha,
+        column_split = colnames(htdf),
+        col = col_fun)
+
+
+m <- c("APOC1", "APOE", "ACP5", "FABP5")
+  
+mean_gene_exp <- AverageExpression(msce,
+                                   features = m,
+                                   group.by = 'celltype',
+                                   slot = 'data') %>%
+  data.frame() %>%
+  as.matrix()
+# add colnames
+colnames(mean_gene_exp) <- gsub('RNA\\.','',colnames(mean_gene_exp))
+
+# Z-score
+htdf <- t(scale(t(mean_gene_exp),scale = T,center = T)) 
+htdf <- htdf [,c(4:9)]
+htdf
+Heatmap(htdf,
+        name = "Z-score",
+        cluster_columns = F,cluster_rows = F,
+        row_title = "LA-TAMs markers",
+        column_title = "Clusters",
+        row_names_gp = gpar(fontface = 'italic',fontsize = 10),
+        row_names_side = 'left',
+        border = T,
+        rect_gp = gpar(col = "white", lwd = 1),
+        column_names_side = 'top',
+        column_names_rot = 45,
+        top_annotation = column_ha,
+        column_split = colnames(htdf),
+        col = col_fun)
+
+```
+
+```{r}
+##cellchat##
+library(CellChat)
+load('./cellchat_Macro.Rdata')
+gg1 <- netVisual_bubble(cellchat, sources.use = 4,
+                        targets.use = c(2,7,8),  comparison = c(1, 2),
+                        max.dataset = 2, title.name = "Increased signaling in High UPR Group",
+                        angle.x = 45,remove.isolate = T)
+gg1
+```
+

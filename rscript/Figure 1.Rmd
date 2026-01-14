@@ -1,0 +1,285 @@
+---
+title: "Figure 1"
+author: "Xinyu Yang"
+date: "2025-12-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+library(WGCNA)
+library(tinyarray)
+library(openxlsx)
+library(dplyr)
+
+exp<-readRDS('./exp_tpm_mRNA_lncRNA_WGCNA.rds')
+datTraits<-readRDS('./pd.rds')
+exp_geneset <- readRDS("./exp_geneset.rds")
+exp_tpm_mRNA<-exp$mRNA
+limma.batch<-as.data.frame(exp_tpm_mRNA)
+datExpr0 = t(limma.batch[order(apply(limma.batch, 1, mad), decreasing = T)[1:5000],])
+datExpr = datExpr0
+powers = c(1:10, seq(from = 12, to=30, by=2))
+sft = pickSoftThreshold(datExpr, powerVector = powers, verbose = 5)
+sft$powerEstimate
+power = sft$powerEstimate
+power
+
+net = blockwiseModules(datExpr, power = 12,
+                       TOMType = "unsigned", 
+                       minModuleSize = 30, 
+                       reassignThreshold = 0, 
+                       mergeCutHeight = 0.25,
+                       deepSplit = 2 ,
+                       numericLabels = TRUE,
+                       pamRespectsDendro = FALSE,
+                       saveTOMs = TRUE,
+                       saveTOMFileBase = "testTOM",
+                       verbose = 3)
+
+moduleLabels = net$colors
+moduleColors = labels2colors(net$colors)
+MEs = net$MEs
+geneTree = net$dendrograms[[1]]
+gm = data.frame(net$colors)
+gm$color = moduleColors
+genes = split(rownames(gm),gm$color)
+# save(genes,file = "genes.Rdata")
+
+#step3.4 模块与表型的相关性
+nGenes = ncol(datExpr)
+nSamples = nrow(datExpr)
+MEs0 = moduleEigengenes(datExpr, moduleColors)$eigengenes
+MEs = orderMEs(MEs0)
+rownames(datTraits)<-datTraits$GSM_ID
+datTraits<-datTraits[colnames(exp_tpm_mRNA),]
+pd_1<-as.data.frame(model.matrix(~Condition -1,datTraits))
+pd<-as.data.frame(t(exp_geneset))[,c(1:4,6:9)]
+pd_2<-cbind(pd_1,pd)
+
+pd_2<-pd_2[rownames(datExpr),]
+pd_2<-rename(pd_2,"Basal"="ConditionBasal",
+             "Stress"="ConditionStress")
+pd_2 <- pd_2[,1:9]
+moduleTraitCor = cor(MEs, pd_2, use = "p")
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nSamples)
+
+textMatrix = paste(signif(moduleTraitCor, 2), "\n(",
+                   signif(moduleTraitPvalue, 1), ")", sep = "")
+dim(textMatrix) = dim(moduleTraitCor)
+pdf("6.labeledHeatmap_score.pdf", width =8, height = 8)
+par(mar = c(10, 10, 4, 2))
+# 然后对moduleTraitCor画热图
+par(font.main = 1)
+labeledHeatmap(Matrix = moduleTraitCor,
+               xLabels = names(pd_2),
+               yLabels = names(MEs),
+               ySymbols = names(MEs),
+               colorLabels = FALSE,
+               colors = blueWhiteRed (50),
+               textMatrix = textMatrix,
+               setStdMargins = T,
+               cex.text = 0.9,
+               zlim = c(-1,1),
+               main = paste("Module-trait relationships"))
+dev.off()
+labeledHeatmap(Matrix = moduleTraitCor,
+               xLabels = names(pd_2),
+               yLabels = names(MEs),
+               ySymbols = names(MEs),
+               colorLabels = FALSE,
+               colors = blueWhiteRed (50),
+               textMatrix = textMatrix,
+               setStdMargins = T,
+               cex.text = 0.9,
+               zlim = c(-1,1),
+               main = paste("Module-trait relationships"))
+
+```
+
+```{r}
+##GS代表模块里的每个基因和所在模块之间的相关性
+#MM代表每个基因和所在模块之间的相关性
+#表示是否与模块的趋势抑制
+modNames<-substring(names(MEs),3)
+names(MEs)
+geneModuleMembership = as.data.frame(cor(datExpr, MEs, use = "p"))
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples))
+names(geneModuleMembership) = paste("MM", modNames, sep="")
+names(MMPvalue) = paste("p.MM", modNames, sep="")
+i = 2
+module = "blue"
+assign(colnames(pd_2)[i],pd_2[i])
+instrait = eval(parse(text = colnames(pd_2)[i]))
+geneTraitSignificance = as.data.frame(cor(datExpr, instrait, use = "p"))
+GSPvalue = as.data.frame(corPvalueStudent(as.matrix(geneTraitSignificance), nSamples))
+names(geneTraitSignificance) = paste("GS.", names(instrait), sep="")
+names(GSPvalue) = paste("p.GS.", names(instrait), sep="")
+column = match(module, modNames) #找到目标模块所在列
+moduleGenes = moduleColors==module #找到模块基因所在行
+verboseScatterplot(abs(geneModuleMembership[moduleGenes, column]),
+                   abs(geneTraitSignificance[moduleGenes, 1]),
+                   xlab = paste("Module Membership in", module, "module"),
+                   ylab = "Gene significance",
+                   main = paste("Module membership vs. gene significance\n"),
+                   cex.main = 1.2, cex.lab = 1.2, cex.axis = 1.2, col = module)
+```
+
+```{r}
+# 自定义颜色
+library(ggplot2)
+library(dplyr)
+library(rstatix)
+library(qs)
+
+test <- readRDS("./GSEA_results.rds")
+
+my_colors <- c(
+  "WGCNA_UPR"   = "#C83231",  # 红色突出
+  "IRE1_branch" = "#76BF0B",
+  "ATF6_branch" = "#F06E00",
+  "PERK_branch" = "#2E5DA5",
+  "REACTOME_UPR "= "#67816D",
+  "GeneCard_UPR"= "#985FBC",
+  "HALLMARK_UPR"= "#D6A364",
+  "GO_UPR"      = "#F37CBF",
+  "WP_UPR"      = "#17BECF"
+)
+
+# 只比较 WGCNA_UPR vs 其他
+stat_res <- test %>%
+  pairwise_t_test(NES ~ ID, ref.group = "WGCNA_UPR", p.adjust.method = "BH") %>%
+  add_significance("p.adj") %>%
+  filter(!is.na(p.adj))   # 避免 NA 报错
+
+# 计算每组均值，并合并显著性结果
+group_means <- test %>%
+  group_by(ID) %>%
+  summarise(mean_val = mean(NES)) %>%
+  left_join(stat_res %>% select(group2, p.adj.signif),
+            by = c("ID" = "group2")) %>%
+  mutate(label_y = mean_val + 0.6)   # 星号放在均值上方 0.5
+
+# 绘图
+p <- ggplot(test, aes(x = ID, y = NES, fill = ID, color = ID)) +
+  stat_summary(fun = "mean", geom = "bar", width = 0.6, alpha = 0.7) +
+  stat_summary(fun.data = "mean_se", geom = "errorbar", width = 0.2) +
+  geom_jitter(width = 0.15, size = 2, alpha = 0.8) +
+  geom_text(data = group_means,
+            aes(x = ID, y = label_y, label = p.adj.signif),
+            inherit.aes = FALSE, color = "black", size = 5) +  # 星号直接显示
+  theme_minimal(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none") +
+  labs(title = "Comparison of NES across gene sets",
+       y = "Normalized Enrichment Score (NES)",
+       x = "") +
+  scale_fill_manual(values = my_colors) +
+  scale_color_manual(values = my_colors)
+p
+```
+
+```{r}
+library(GseaVis)
+GSEA_plot<-readRDS('./GSEA_plot.rds')
+
+p1<-gseaNb(object = GSEA_plot[[1]],
+           geneSetID = 'WGCNA_UPR_MODULE',
+           subPlot = 2,
+           addPval = T)
+p1
+p2<-gseaNb(object = GSEA_plot[[2]],
+           geneSetID = 'WGCNA_UPR_MODULE',
+           subPlot = 2,
+           addPval = T)
+  
+p2
+
+```
+
+```{r}
+library(ggplot2)
+library(ggpubr)
+
+if(T){
+  text.size = 10
+  text.angle = 45
+  text.hjust = 1
+  legend.position = "right"
+  mytheme <- theme(plot.title = element_text(size = text.size+2,color="black",hjust = 0.5),
+                   axis.ticks = element_line(color = "black"),
+                   axis.title = element_text(size = text.size,color ="black"), 
+                   axis.text = element_text(size=text.size,color = "black"),
+                   axis.text.x = element_text(angle = text.angle, hjust = text.hjust ), #,vjust = 0.5
+                   #axis.line = element_line(color = "black"),
+                   #axis.ticks = element_line(color = "black"),
+                   #panel.grid.minor.y = element_blank(),
+                   #panel.grid.minor.x = element_blank(),
+                   panel.grid=element_blank(), # 去网格线
+                   legend.position = legend.position,
+                   legend.text = element_text(size= text.size),
+                   legend.title= element_text(size= text.size),
+                   # panel.border = element_rect(fill=NA,color="black", size=0.8, linetype="solid"),
+                   # strip.background = element_rect(color="black",size= 1, linetype="solid") # fill="#FC4E07", 
+  )
+}
+
+score <- readRDS('./paired_score.rds')
+
+comparisons<-list(c('tumor','normal'))
+fill.color = c(normal="#0072B5FF",tumor= "#FF7F00")
+p2 = ggplot(score, aes(x = Group,y =UPR_score,fill = Group)) +
+  geom_line(aes(group=paired),position = position_dodge(0.2),color="grey80") +
+  geom_point(aes(group=paired,size=Expression),
+             pch=21,
+             size=2.5,
+             # position = position_dodge(0),
+             position = position_jitter(w = 0.1))+
+  #stat_summary(fun.data = 'mean_se', geom = "errorbar", color = "red", 
+  #             width = 0.25, size = 0.8, position = position_dodge( .9)) +
+  facet_wrap(~Type,scales = "free_y",nrow = 2) + 
+  # scale_size_continuous(range=c(1,3)) +
+  scale_fill_manual(values = fill.color) +
+  # scale_y_continuous(limits = c(-4,4),minor_breaks = seq(0,90,1)) +
+  labs(x= NULL,y="Gene expression")+
+  stat_compare_means(comparisons=comparisons,
+                     aes(group =  Group),
+                     paired = T,
+    #               label.y = 2.0, 
+                     label.x = 1.5,
+                     method = "t.test",
+                     label = "p.signif",
+                     size = 4) + 
+  theme_bw() + theme(panel.grid.major = element_blank(),
+                             panel.grid.minor = element_blank())+
+  theme(axis.text = element_text(size = 14),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12))+
+  scale_y_continuous(expand = c(0.1, 0.1))
+p2
+
+
+```
